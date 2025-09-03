@@ -87,7 +87,95 @@
 
 
 
-name: Deploy Laravel + Nginx to Amazon ECS
+# name: Deploy Laravel + Nginx to Amazon ECS
+
+# on:
+#   push:
+#     branches: [ "main" ]
+
+# env:
+#   AWS_REGION: us-east-1
+#   ECR_REPOSITORY: laravel-ecr-repository
+#   ECS_SERVICE: laravel-ecs-service
+#   ECS_CLUSTER: laravel-ecs-cluster
+#   ECS_TASK_DEFINITION: laravel-ecs-task-def-fam 
+#   LARAVEL_CONTAINER_NAME: laravel
+#   NGINX_CONTAINER_NAME: laravel-nginx
+
+# permissions:
+#   contents: read
+
+# jobs:
+#   deploy:
+#     name: Deploy
+#     runs-on: ubuntu-latest
+#     environment: dev
+
+#     steps:
+#     - name: Checkout
+#       uses: actions/checkout@v4
+
+#     - name: Configure AWS credentials
+#       uses: aws-actions/configure-aws-credentials@v1
+#       with:
+#         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#         aws-region: ${{ env.AWS_REGION }}
+
+#     - name: Login to Amazon ECR
+#       id: login-ecr
+#       uses: aws-actions/amazon-ecr-login@v1
+
+#     - name: Build and push Laravel image
+#       id: build-laravel
+#       env:
+#         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#         IMAGE_TAG: ${{ github.sha }}
+#       run: |
+#         docker build -f Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:php-$IMAGE_TAG .
+#         docker push $ECR_REGISTRY/$ECR_REPOSITORY:php-$IMAGE_TAG
+#         echo "laravel_image=$ECR_REGISTRY/$ECR_REPOSITORY:php-$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+#     - name: Build and push Nginx image
+#       id: build-nginx
+#       env:
+#         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#         IMAGE_TAG: ${{ github.sha }}
+#       run: |
+#         docker build -f Dockerfile.nginx -t $ECR_REGISTRY/$ECR_REPOSITORY:nginx-$IMAGE_TAG .
+#         docker push $ECR_REGISTRY/$ECR_REPOSITORY:nginx-$IMAGE_TAG
+#         echo "nginx_image=$ECR_REGISTRY/$ECR_REPOSITORY:nginx-$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+#     - name: Update ECS Task Definition with new images
+#       id: task-def
+#       uses: aws-actions/amazon-ecs-render-task-definition@v1
+#       with:
+#         task-definition: ${{ env.ECS_TASK_DEFINITION }}
+#         container-name: ${{ env.LARAVEL_CONTAINER_NAME }}
+#         image: ${{ steps.build-laravel.outputs.laravel_image }}
+
+#     - name: Update ECS Task Definition for Nginx
+#       id: task-def-nginx
+#       uses: aws-actions/amazon-ecs-render-task-definition@v1
+#       with:
+#         task-definition: ${{ steps.task-def.outputs.task-definition }}
+#         container-name: ${{ env.NGINX_CONTAINER_NAME }}
+#         image: ${{ steps.build-nginx.outputs.nginx_image }}
+
+#     - name: Deploy ECS service
+#       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+#       with:
+#         task-definition: ${{ steps.task-def-nginx.outputs.task-definition }}
+#         service: ${{ env.ECS_SERVICE }}
+#         cluster: ${{ env.ECS_CLUSTER }}
+#         wait-for-service-stability: true
+#         force-new-deployment: true
+
+
+
+
+
+name: Deploy Laravel + Nginx to ECS
 
 on:
   push:
@@ -96,9 +184,9 @@ on:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: laravel-ecr-repository
-  ECS_SERVICE: laravel-ecs-service
   ECS_CLUSTER: laravel-ecs-cluster
-  ECS_TASK_DEFINITION: laravel-ecs-task-def-fam 
+  ECS_SERVICE: laravel-ecs-service
+  TASK_DEFINITION_FAMILY: laravel-ecs-task-def-fam
   LARAVEL_CONTAINER_NAME: laravel
   NGINX_CONTAINER_NAME: laravel-nginx
 
@@ -107,66 +195,62 @@ permissions:
 
 jobs:
   deploy:
-    name: Deploy
     runs-on: ubuntu-latest
-    environment: dev
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
-    - name: Build and push Laravel image
-      id: build-laravel
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        docker build -f Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:php-$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:php-$IMAGE_TAG
-        echo "laravel_image=$ECR_REGISTRY/$ECR_REPOSITORY:php-$IMAGE_TAG" >> $GITHUB_OUTPUT
+      - name: Build, tag, and push Laravel image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: php-${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.php .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "LARAVEL_IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
 
-    - name: Build and push Nginx image
-      id: build-nginx
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
-      run: |
-        docker build -f Dockerfile.nginx -t $ECR_REGISTRY/$ECR_REPOSITORY:nginx-$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:nginx-$IMAGE_TAG
-        echo "nginx_image=$ECR_REGISTRY/$ECR_REPOSITORY:nginx-$IMAGE_TAG" >> $GITHUB_OUTPUT
+      - name: Build, tag, and push NGINX image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: nginx-${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.nginx .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "NGINX_IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
 
-    - name: Update ECS Task Definition with new images
-      id: task-def
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: ${{ env.ECS_TASK_DEFINITION }}
-        container-name: ${{ env.LARAVEL_CONTAINER_NAME }}
-        image: ${{ steps.build-laravel.outputs.laravel_image }}
+      - name: Render ECS Task Definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: .github/ecs/laravel-task-def.json
+          container-name: ${{ env.LARAVEL_CONTAINER_NAME }}
+          image: ${{ env.LARAVEL_IMAGE }}
 
-    - name: Update ECS Task Definition for Nginx
-      id: task-def-nginx
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: ${{ steps.task-def.outputs.task-definition }}
-        container-name: ${{ env.NGINX_CONTAINER_NAME }}
-        image: ${{ steps.build-nginx.outputs.nginx_image }}
+      - name: Update NGINX image in ECS Task Definition
+        id: task-def-nginx
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          container-name: ${{ env.NGINX_CONTAINER_NAME }}
+          image: ${{ env.NGINX_IMAGE }}
 
-    - name: Deploy ECS service
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-      with:
-        task-definition: ${{ steps.task-def-nginx.outputs.task-definition }}
-        service: ${{ env.ECS_SERVICE }}
-        cluster: ${{ env.ECS_CLUSTER }}
-        wait-for-service-stability: true
-        force-new-deployment: true
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def-nginx.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+            # force-new-deployment: true
