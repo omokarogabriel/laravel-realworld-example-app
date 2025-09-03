@@ -262,6 +262,100 @@
 
 
 
+# name: Deploy Laravel + Nginx to ECS
+
+# on:
+#   push:
+#     branches: [ "main" ]
+
+# env:
+#   AWS_REGION: us-east-1
+#   ECR_REPOSITORY: laravel-ecr-repository
+#   ECS_CLUSTER: laravel-ecs-cluster
+#   ECS_SERVICE: laravel-ecs-service
+#   TERRAFORM_DIR: ./terraform/dev  # Path to your Terraform environment
+
+# permissions:
+#   contents: read
+
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout repo
+#         uses: actions/checkout@v4
+
+#       - name: Configure AWS credentials
+#         uses: aws-actions/configure-aws-credentials@v1
+#         with:
+#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#           aws-region: ${{ env.AWS_REGION }}
+
+#       - name: Login to ECR
+#         id: login-ecr
+#         uses: aws-actions/amazon-ecr-login@v1
+
+#       - name: Build, tag, and push Laravel image
+#         env:
+#           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#           IMAGE_TAG: php-${{ github.sha }}
+#         run: |
+#           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile .
+#           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+#           echo "LARAVEL_IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
+
+#       - name: Build, tag, and push NGINX image
+#         env:
+#           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+#           IMAGE_TAG: nginx-${{ github.sha }}
+#         run: |
+#           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.nginx .
+#           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+#           echo "NGINX_IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
+
+#       - name: Initialize Terraform
+#         working-directory: ${{ env.TERRAFORM_DIR }}
+#         run: terraform init
+
+#       - name: Apply Terraform
+#         id: terraform-apply
+#         working-directory: ${{ env.TERRAFORM_DIR }}
+#         run: |
+#           terraform apply -auto-approve
+#           # Export the ECS task definition ARN as an output
+#           echo "ecs_task_definition_arn=$(terraform output -raw ecs_task_definition_arn)" >> $GITHUB_ENV
+
+#       - name: Update Laravel container in ECS Task Definition
+#         id: task-def-laravel
+#         uses: aws-actions/amazon-ecs-render-task-definition@v1
+#         with:
+#           task-definition: ${{ env.ecs_task_definition_arn }}
+#           container-name: laravel
+#           image: ${{ env.LARAVEL_IMAGE }}
+
+#       - name: Update NGINX container in ECS Task Definition
+#         id: task-def-nginx
+#         uses: aws-actions/amazon-ecs-render-task-definition@v1
+#         with:
+#           task-definition: ${{ steps.task-def-laravel.outputs.task-definition }}
+#           container-name: laravel-nginx
+#           image: ${{ env.NGINX_IMAGE }}
+
+#       - name: Deploy to ECS
+#         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+#         with:
+#           task-definition: ${{ steps.task-def-nginx.outputs.task-definition }}
+#           service: ${{ env.ECS_SERVICE }}
+#           cluster: ${{ env.ECS_CLUSTER }}
+#           wait-for-service-stability: true
+#           force-new-deployment: true
+
+
+
+
+
 name: Deploy Laravel + Nginx to ECS
 
 on:
@@ -273,7 +367,9 @@ env:
   ECR_REPOSITORY: laravel-ecr-repository
   ECS_CLUSTER: laravel-ecs-cluster
   ECS_SERVICE: laravel-ecs-service
-  TERRAFORM_DIR: ./terraform/dev  # Path to your Terraform environment
+  TASK_DEFINITION: .github/ecs/laravel-task-def.json
+  LARAVEL_CONTAINER_NAME: laravel
+  NGINX_CONTAINER_NAME: laravel-nginx
 
 permissions:
   contents: read
@@ -315,38 +411,18 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "NGINX_IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_ENV
 
-      - name: Initialize Terraform
-        working-directory: ${{ env.TERRAFORM_DIR }}
-        run: terraform init
-
-      - name: Apply Terraform
-        id: terraform-apply
-        working-directory: ${{ env.TERRAFORM_DIR }}
-        run: |
-          terraform apply -auto-approve
-          # Export the ECS task definition ARN as an output
-          echo "ecs_task_definition_arn=$(terraform output -raw ecs_task_definition_arn)" >> $GITHUB_ENV
-
-      - name: Update Laravel container in ECS Task Definition
-        id: task-def-laravel
+      - name: Update ECS Task Definition with new images
+        id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ${{ env.ecs_task_definition_arn }}
-          container-name: laravel
-          image: ${{ env.LARAVEL_IMAGE }}
-
-      - name: Update NGINX container in ECS Task Definition
-        id: task-def-nginx
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: ${{ steps.task-def-laravel.outputs.task-definition }}
-          container-name: laravel-nginx
-          image: ${{ env.NGINX_IMAGE }}
+          task-definition: ${{ env.TASK_DEFINITION }}
+          container-names: ${{ env.LARAVEL_CONTAINER_NAME }},${{ env.NGINX_CONTAINER_NAME }}
+          images: ${{ env.LARAVEL_IMAGE }},${{ env.NGINX_IMAGE }}
 
       - name: Deploy to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v1
         with:
-          task-definition: ${{ steps.task-def-nginx.outputs.task-definition }}
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
